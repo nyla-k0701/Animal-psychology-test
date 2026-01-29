@@ -7,13 +7,13 @@ from openai import OpenAI
 # Page Config
 # -----------------------------
 st.set_page_config(
-    page_title="나는 무슨 빵일까?🍞",
-    page_icon="🍞",
+    page_title="나는 어떤 모동숲 주민일까?🌿",
+    page_icon="🌿",
     layout="centered",
 )
 
 # -----------------------------
-# OpenAI Client (Streamlit Cloud)
+# OpenAI Client (Streamlit Cloud: use st.secrets)
 # -----------------------------
 API_KEY = st.secrets.get("OPENAI_API_KEY", None)
 client = OpenAI(api_key=API_KEY) if API_KEY else None
@@ -26,9 +26,6 @@ NUM_QUESTIONS = 5
 if "answers" not in st.session_state:
     st.session_state.answers = [None] * NUM_QUESTIONS
 
-if "current_q" not in st.session_state:
-    st.session_state.current_q = 0  # 0-index
-
 if "ai_result" not in st.session_state:
     st.session_state.ai_result = ""
 
@@ -40,11 +37,8 @@ if "has_result" not in st.session_state:
 # -----------------------------
 def reset_test():
     st.session_state.answers = [None] * NUM_QUESTIONS
-    st.session_state.current_q = 0
     st.session_state.ai_result = ""
     st.session_state.has_result = False
-
-    # 현재 문항의 radio 위젯 상태도 모두 초기화
     for i in range(NUM_QUESTIONS):
         key = f"q_{i}"
         if key in st.session_state:
@@ -54,7 +48,7 @@ def reset_test():
 # 클립보드 복사 (JS)
 # -----------------------------
 def copy_to_clipboard(text: str):
-    js_text = repr(text)
+    js_text = repr(text)  # safely escape quotes/newlines
     components.html(
         f"""
         <script>
@@ -72,53 +66,17 @@ def copy_to_clipboard(text: str):
     )
 
 # -----------------------------
-# 빵 유형별 대표 대사 (결과 카드에 추가)
+# Prompts
 # -----------------------------
-BREAD_CATCHPHRASE = {
-    "소금빵": "“심플한데 계속 생각나는 게 내 매력이야.”",
-    "크루아상": "“겉은 바삭, 속은 말랑… 나 꽤 다채로운 사람임.”",
-    "바게트": "“쉽게 친해지진 않지만, 친해지면 오래 가.”",
-    "식빵": "“나랑 있으면 일상이 좀 편해질걸?”",
-    "베이글": "“나 좀 단단해 보여도, 속은 꽤 따뜻해.”",
-    "단팥빵": "“겉보기보다 정 많은 거, 나만 알면 돼.”",
-    "치아바타": "“호불호는 갈려도, 맞는 사람한텐 최애야.”",
-    "초코소라빵": "“나랑 있으면 심심할 틈은 없어.”",
-}
+SYSTEM_PROMPT = """
+당신은 유쾌한 동물 심리학자입니다. 재밌있는 비유와 이모지를 사용해서 결과를 알려주세요.
 
-def append_catchphrase(result_text: str) -> str:
-    bread_name = None
-    for line in result_text.splitlines():
-        if "🍞" in line and "빵 유형" in line and ":" in line:
-            bread_name = line.split(":", 1)[1].strip()
-            bread_name = bread_name.split()[0].strip()
-            break
+답변 형식:
+1. 🐾 당신과 어울리는 동물: [동물 이름]
+2. 📝 이유: [답변 패턴을 바탕으로 2-3문장 설명]
+3. 💡 조언: [이 유형에게 맞는 조언 1-2개]
 
-    if bread_name and bread_name in BREAD_CATCHPHRASE:
-        phrase_block = f"\n\n**🐣 대표 대사**\n- {BREAD_CATCHPHRASE[bread_name]}"
-        return result_text + phrase_block
-
-    return result_text + "\n\n**🐣 대표 대사**\n- “오늘도 빵처럼 포근하게 굴러가는 중…🍞”"
-
-# -----------------------------
-# 시스템 프롬프트 (MZ + 궁합 포함)
-# -----------------------------
-SYSTEM_PROMPT = f"""
-너는 MZ 감성 만렙의 '빵 심리학자'야 🍞✨
-사용자의 선택을 바탕으로 "나는 무슨 빵일까?" 결과를 재밌고 찰떡 비유로 알려줘.
-톤은 가볍고 유쾌하게, 이모지 적극 사용!
-
-반드시 아래 형식으로 출력해:
-1. 🍞 당신의 빵 유형: [빵 이름]
-2. 🧠 성격 요약: [2-3문장, 빵 비유 필수]
-3. 💡 관계 팁: [1-2개]
-4. 💞 궁합이 좋은 빵: [빵 이름]
-5. 🔎 궁합 이유: [왜 잘 맞는지 1-2문장]
-
-중요:
-- 빵 이름은 아래 목록 중에서만 선택해:
-  {", ".join(BREAD_CATCHPHRASE.keys())}
-- 궁합이 좋은 빵도 위 목록 중에서 선택해.
-- 사용자의 답변 패턴을 근거로 설명해.
+전체적으로 가볍고 친근한 톤을 유지해주세요.
 """
 
 def build_user_answers_text(answers):
@@ -140,165 +98,139 @@ def stream_ai_result(user_text: str):
             yield token
 
 # -----------------------------
-# 질문 데이터 (빵집 상황 기반)
-# -----------------------------
-questions = [
-    {
-        "q": "1) 빵집에 들어가자마자 당신의 시선은?",
-        "options": [
-            "오늘의 신상/베스트 빵 👀",
-            "늘 먹던 익숙한 빵 코너",
-            "사람들 많이 고른 빵",
-            "천천히 한 바퀴 돌며 전체 탐색",
-        ],
-    },
-    {
-        "q": "2) 사고 싶은 빵이 딱 하나 남아 있다면?",
-        "options": [
-            "고민 없이 바로 집는다",
-            "괜히 다른 빵도 비교해본다",
-            "다른 사람에게 양보할까 잠깐 고민",
-            "다음에 와도 되지… 하고 내려놓는다",
-        ],
-    },
-    {
-        "q": "3) 직원이 빵을 추천해준다면?",
-        "options": [
-            "오 추천 좋아요! 그걸로 주세요",
-            "참고만 하고 내 취향대로 고른다",
-            "왜 추천인지 이유부터 듣는다",
-            "괜히 거절 못 하고 추천받은 걸 산다",
-        ],
-    },
-    {
-        "q": "4) 줄이 생각보다 길다. 이때 당신은?",
-        "options": [
-            "상관없음! 기다리는 김에 구경",
-            "속으로 조급해지지만 참고 기다림",
-            "나중에 올까 고민하다가 나간다",
-            "친구랑 같이라면 수다로 버팀",
-        ],
-    },
-    {
-        "q": "5) 계산대 앞, 마지막 선택의 순간!",
-        "options": [
-            "원래 계획한 빵만 산다",
-            "하나쯤 더… 충동 추가",
-            "누군가 줄 선 사람을 의식해 빠르게 결정",
-            "지금 기분에 끌리는 걸 고른다",
-        ],
-    },
-]
-
-# -----------------------------
 # UI - Title & Intro
 # -----------------------------
-st.title("나는 무슨 빵일까🍞? 빵집 선택으로 보는 성격 테스트")
+st.title("나는 어떤 모동숲 주민일까?🌿 동숲 대사선택으로 보는 인간관계 스타일")
 st.markdown(
     """
-빵집에서 실제로 겪을 법한 상황에서 **당신의 선택**을 골라보세요 🥐  
-AI가 당신의 **성격 & 인간관계 스타일**을  
-찰떡같은 **빵 유형 + 궁합 빵 + 대표 대사**로 알려줘요 💞
+가볍게 대사를 골라보면,  
+AI가 당신의 **인간관계 스타일**을 분석해 **어울리는 동물**로 알려줘요 🐾✨
+
+아래 5개 질문에 답하고 **결과 보기**를 눌러주세요!
 """
 )
 
 st.divider()
 
 # -----------------------------
-# 진행 상태 표시
+# 질문/선택지 데이터
 # -----------------------------
-current = st.session_state.current_q
-progress = (current) / NUM_QUESTIONS
-st.progress(progress, text=f"진행도: {current}/{NUM_QUESTIONS}")
+questions = [
+    {
+        "q": "1. 마을에 새 주민이 이사 왔다.\n그 주민이 당신을 보고 말을 걸어왔다면?",
+        "options": [
+            "와! 반가워 😊 우리 마을 어때?",
+            "안녕. (웃으며 짧게 인사한다)",
+            "짐 옮기는 거 도와줄까?",
+            "… (상대가 더 말할 때까지 기다린다)",
+        ],
+    },
+    {
+        "q": "2. 친하다고 생각한 주민이 요즘 먼저 말을 안 건다. 이럴 때 당신은?",
+        "options": [
+            "내가 뭐 잘못했나? 바로 말을 건다",
+            "굳이 캐묻지 않고 거리를 유지한다",
+            "괜히 신경 쓰여서 먼저 챙긴다",
+            "이유를 곰곰이 생각하며 상황을 본다",
+        ],
+    },
+    {
+        "q": "3. 주민이 고민을 털어놓으며 도움을 요청했다. 당신의 반응은?",
+        "options": [
+            "에이, 당연하지! 내가 옆에 있잖아",
+            "이건 이렇게 해보는 게 어때? (현실적 조언)",
+            "많이 힘들었겠다… 감정부터 공감한다",
+            "조용히 끝까지 들어준다",
+        ],
+    },
+    {
+        "q": "4. 마을 회의에서 의견이 갈렸다. 당신의 선택은?",
+        "options": [
+            "분위기를 부드럽게 만들려고 농담한다",
+            "필요 이상으로 나서지 않는다",
+            "모두가 상처받지 않는 쪽을 고른다",
+            "핵심만 정리해서 말한다",
+        ],
+    },
+    {
+        "q": "5. 하루가 끝나고 집에 돌아온 밤. 당신에게 가장 필요한 건?",
+        "options": [
+            "누군가와 수다 떨며 하루 정리",
+            "아무도 없는 조용한 시간",
+            "오늘 잘했어라는 한마디",
+            "혼자 생각하며 정리하는 시간",
+        ],
+    },
+]
 
 # -----------------------------
-# 현재 질문 1개만 표시
+# 질문 렌더링
 # -----------------------------
-q_item = questions[current]
-st.subheader(f"Q{current + 1}")
-selected = st.radio(
-    q_item["q"],
-    q_item["options"],
-    key=f"q_{current}",
-    index=None
-    if st.session_state.answers[current] is None
-    else q_item["options"].index(st.session_state.answers[current]),
-)
-st.session_state.answers[current] = selected
+for i, item in enumerate(questions):
+    st.subheader(f"Q{i+1}")
+    selected = st.radio(
+        item["q"],
+        item["options"],
+        key=f"q_{i}",
+        index=None if st.session_state.answers[i] is None else item["options"].index(st.session_state.answers[i]),
+    )
+    st.session_state.answers[i] = selected
+    st.write("")
 
-st.write("")
+st.divider()
 
 # -----------------------------
-# 네비게이션 버튼 (다음/이전/결과 보기/리셋)
+# 버튼 UI
 # -----------------------------
-nav1, nav2, nav3 = st.columns([1, 1, 1])
-
-with nav1:
+col1, col2 = st.columns(2)
+with col1:
+    analyze_clicked = st.button("결과 보기", type="primary")
+with col2:
     if st.button("다시 테스트하기"):
         reset_test()
         st.rerun()
 
-with nav2:
-    if current > 0:
-        if st.button("이전"):
-            st.session_state.current_q -= 1
-            st.rerun()
+# -----------------------------
+# 결과 분석 (로딩 + 스트리밍)
+# -----------------------------
+if analyze_clicked:
+    if not API_KEY:
+        st.error("Streamlit Cloud의 Secrets에 OPENAI_API_KEY를 설정해주세요.")
+    elif any(a is None for a in st.session_state.answers):
+        st.warning("모든 질문에 답해주세요!")
     else:
-        st.button("이전", disabled=True)
+        st.session_state.ai_result = ""
+        st.session_state.has_result = False
 
-with nav3:
-    # 마지막 문항이 아니면 "다음", 마지막이면 "결과 보기"
-    if current < NUM_QUESTIONS - 1:
-        if st.button("다음", type="primary"):
-            if st.session_state.answers[current] is None:
-                st.warning("답변을 선택해줘! 😆")
-            else:
-                st.session_state.current_q += 1
-                st.rerun()
-    else:
-        analyze_clicked = st.button("결과 보기", type="primary")
-        if analyze_clicked:
-            if not API_KEY:
-                st.error("Streamlit Cloud Secrets에 OPENAI_API_KEY를 설정해주세요.")
-            elif any(a is None for a in st.session_state.answers):
-                st.warning("모든 질문에 답해주세요!")
-            else:
-                st.session_state.ai_result = ""
-                st.session_state.has_result = False
+        user_text = build_user_answers_text(st.session_state.answers)
 
-                user_text = build_user_answers_text(st.session_state.answers)
+        with st.container(border=True):
+            st.subheader("🧠 유쾌한 동물 심리학자가 분석 중이에요... 🐾")
+            placeholder = st.empty()
 
-                st.divider()
-                with st.container(border=True):
-                    st.subheader("🥐 빵 굽는 중… 성격 분석 중입니다")
-                    placeholder = st.empty()
-
-                    with st.spinner("오븐 예열 중 🔥"):
-                        full_text = ""
-                        try:
-                            for token in stream_ai_result(user_text):
-                                full_text += token
-                                placeholder.markdown(full_text)
-                                time.sleep(0.02)
-                            # 대표 대사 추가
-                            full_text = append_catchphrase(full_text)
-
-                            st.session_state.ai_result = full_text
-                            st.session_state.has_result = True
-                        except Exception as e:
-                            st.error(f"AI 분석 중 오류: {e}")
+            with st.spinner("결과를 만들고 있어요... 잠깐만요! 🌿"):
+                full_text = ""
+                try:
+                    for token in stream_ai_result(user_text):
+                        full_text += token
+                        placeholder.markdown(full_text)
+                        time.sleep(0.02)  # typing effect
+                    st.session_state.ai_result = full_text
+                    st.session_state.has_result = True
+                except Exception as e:
+                    st.error(f"AI 분석 중 오류가 발생했습니다: {e}")
 
 # -----------------------------
-# 결과 표시 + 공유
+# 결과 표시 (테두리 + 공유 버튼 + 클립보드 복사)
 # -----------------------------
 if st.session_state.has_result and st.session_state.ai_result:
-    st.divider()
+    st.write("")
     with st.container(border=True):
-        st.subheader("🍞 당신의 빵 성격 결과")
+        st.subheader("🌿 당신의 심리테스트 결과")
         st.markdown(st.session_state.ai_result)
 
         st.divider()
 
         if st.button("결과 공유하기", use_container_width=True):
             copy_to_clipboard(st.session_state.ai_result)
-            st.success("클립보드에 복사했어요! 📋✨")
+            st.success("클립보드에 복사했어요! 📋✨ (붙여넣기 해보세요)")
